@@ -1,65 +1,85 @@
 import streamlit as st
 import pandas as pd
-from prophet import Prophet
-from prophet.plot import plot_plotly
+import numpy as np
 import plotly.graph_objects as go
+from pmdarima import auto_arima
+from datetime import timedelta
 
-# App title
-st.set_page_config(page_title="Financial Time Series Forecast", layout="centered")
-st.title("📈 Financial Time Series Forecasting App")
+# Set up Streamlit page
+st.set_page_config(page_title="📈 ARIMA Time Series Forecast", layout="centered")
+st.title("📉 Financial Time Series Forecasting (ARIMA Model)")
 
-# Sidebar instructions
-st.sidebar.header("📂 Upload Data")
-st.sidebar.markdown("Upload a CSV file with **date** and **value** columns.")
+# Sidebar - File upload and options
+st.sidebar.header("📂 Upload Your Data")
+uploaded_file = st.sidebar.file_uploader("Upload a CSV with 'date' and 'value' columns", type=["csv"])
 
-# File uploader
-uploaded_file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
+forecast_horizon = st.sidebar.slider("Forecast Horizon (days)", min_value=7, max_value=365, value=90, step=1)
 
-# Forecast slider
-forecast_period = st.sidebar.slider("Select Forecast Horizon (days)", 7, 365, 90)
-
-# Proceed if a file is uploaded
+# Process file if uploaded
 if uploaded_file:
     try:
         df = pd.read_csv(uploaded_file)
-
-        # Basic validation
-        if "date" not in df.columns or "value" not in df.columns:
+        if 'date' not in df.columns or 'value' not in df.columns:
             st.error("❌ CSV must contain 'date' and 'value' columns.")
         else:
-            # Preprocessing
-            df["date"] = pd.to_datetime(df["date"])
-            df = df[["date", "value"]].rename(columns={"date": "ds", "value": "y"})
+            # Prepare data
+            df['date'] = pd.to_datetime(df['date'])
+            df = df.sort_values('date')
+            ts = df.set_index('date')['value']
 
-            st.success("✅ Data uploaded successfully!")
-            st.write("Preview of uploaded data:")
+            st.success("✅ File successfully loaded!")
+            st.write("Data preview:")
             st.dataframe(df.head())
 
-            # Prophet model
-            with st.spinner("Training forecasting model..."):
-                model = Prophet()
-                model.fit(df)
+            # Fit ARIMA model
+            with st.spinner("Fitting ARIMA model..."):
+                model = auto_arima(ts, seasonal=False, stepwise=True, suppress_warnings=True)
+                forecast, conf_int = model.predict(n_periods=forecast_horizon, return_conf_int=True)
 
-                # Create future dataframe
-                future = model.make_future_dataframe(periods=forecast_period)
-                forecast = model.predict(future)
+                # Forecast index
+                last_date = ts.index[-1]
+                forecast_dates = pd.date_range(start=last_date + timedelta(days=1), periods=forecast_horizon)
 
-            # Plot
+                # Forecast DataFrame
+                forecast_df = pd.DataFrame({
+                    'date': forecast_dates,
+                    'forecast': forecast,
+                    'lower': conf_int[:, 0],
+                    'upper': conf_int[:, 1]
+                })
+
+            # Plotting
             st.subheader("📊 Forecast Plot")
-            fig = plot_plotly(model, forecast)
+            fig = go.Figure()
+
+            # Historical data
+            fig.add_trace(go.Scatter(x=ts.index, y=ts.values, mode='lines', name='Actual'))
+
+            # Forecast
+            fig.add_trace(go.Scatter(x=forecast_df['date'], y=forecast_df['forecast'], mode='lines', name='Forecast'))
+            fig.add_trace(go.Scatter(
+                x=forecast_df['date'], y=forecast_df['upper'],
+                mode='lines', name='Upper Bound', line=dict(width=0), showlegend=False
+            ))
+            fig.add_trace(go.Scatter(
+                x=forecast_df['date'], y=forecast_df['lower'],
+                mode='lines', name='Lower Bound', fill='tonexty', line=dict(width=0), fillcolor='rgba(0,100,80,0.2)', showlegend=True
+            ))
+
+            fig.update_layout(title="Forecast with ARIMA",
+                              xaxis_title="Date", yaxis_title="Value",
+                              template="plotly_white")
             st.plotly_chart(fig)
 
-            # Display forecast data
+            # Show forecast data
             st.subheader("📋 Forecasted Values")
-            st.dataframe(forecast[["ds", "yhat", "yhat_lower", "yhat_upper"]].tail(forecast_period))
+            st.dataframe(forecast_df)
 
     except Exception as e:
-        st.error(f"⚠️ Error processing file: {e}")
+        st.error(f"⚠️ An error occurred: {e}")
 else:
     st.info("Please upload a CSV file to begin.")
 
 # Footer
-st.markdown("""
----
-*Built with [Facebook Prophet](https://facebook.github.io/prophet/) and Streamlit*
-""")
+st.markdown("---")
+st.caption("Developed using ARIMA modeling with pmdarima. Suitable for stationary or differenced financial time series.")
