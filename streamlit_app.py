@@ -1,6 +1,4 @@
 import streamlit as st
-
-import streamlit as st
 import pandas as pd
 from prophet import Prophet
 from prophet.plot import plot_plotly
